@@ -1,0 +1,109 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "poe-talk",
+  "title": "Poe-talk",
+  "description": "",
+  "icon": "extension-icon.png",
+  "author": "IntelHeartPrime",
+  "platforms": [
+    "macOS",
+    "Windows"
+  ],
+  "categories": [
+    "Applications"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "poe-talking-chat",
+      "title": "Chat with Poe AI",
+      "subtitle": "Poe",
+      "description": "Interactive chat interface with Poe AI",
+      "mode": "view"
+    },
+    {
+      "name": "poe-talking-history",
+      "title": "Browse Poe Conversations",
+      "subtitle": "Poe",
+      "description": "Browse and manage your Poe conversation history",
+      "mode": "view"
+    },
+    {
+      "name": "poe-test-connection",
+      "title": "Test Poe Connection",
+      "subtitle": "Poe",
+      "description": "Test your Poe API connection and settings",
+      "mode": "no-view"
+    },
+    {
+      "name": "poe-clear-history",
+      "title": "Clear All Conversations",
+      "subtitle": "Poe",
+      "description": "Delete all conversation history",
+      "mode": "no-view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "poeApiKey",
+      "title": "Poe API Key",
+      "description": "Your Poe API key from poe.com/api_key",
+      "type": "password",
+      "required": true
+    },
+    {
+      "name": "botName",
+      "title": "Bot Name",
+      "description": "The Poe bot to use (e.g., Claude-Sonnet-4.5, GPT-5, Grok-4)",
+      "type": "textfield",
+      "default": "Claude-Sonnet-4.5",
+      "required": true
+    },
+    {
+      "name": "proxyUrl",
+      "title": "Proxy URL (Optional)",
+      "description": "HTTP/HTTPS proxy (e.g., http://127.0.0.1:7890)",
+      "type": "textfield",
+      "required": false,
+      "placeholder": "http://127.0.0.1:7890"
+    },
+    {
+      "name": "refererUrl",
+      "title": "Referer URL (Optional)",
+      "description": "HTTP-Referer header for leaderboard attribution",
+      "type": "textfield",
+      "required": false
+    },
+    {
+      "name": "appTitle",
+      "title": "App Title (Optional)",
+      "description": "X-Title header for leaderboard display name",
+      "type": "textfield",
+      "required": false
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.103.7",
+    "@raycast/utils": "^1.17.0",
+    "https-proxy-agent": "^7.0.6",
+    "node-fetch": "^2.7.0",
+    "openai": "^6.9.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/node": "22.13.10",
+    "@types/node-fetch": "^2.6.13",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}
