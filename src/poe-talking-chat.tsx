@@ -27,33 +27,73 @@ interface Preferences {
   appTitle?: string;
 }
 
-// Helper function to format relative time
+// Cache for formatted times to avoid recalculation
+const timeFormatCache = new Map<string, string>();
+
+// Helper function to format relative time with caching
 function formatRelativeTime(timestamp: number): string {
+  const cacheKey = `${timestamp}_${Math.floor(Date.now() / 60000)}`; // Cache per minute
+  
+  if (timeFormatCache.has(cacheKey)) {
+    return timeFormatCache.get(cacheKey)!;
+  }
+  
   const now = Date.now();
   const diff = now - timestamp;
-  const seconds = Math.floor(diff / 1000);
-  const minutes = Math.floor(seconds / 60);
+  const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
-  if (seconds < 60) return "刚刚";
-  if (minutes < 60) return `${minutes}分钟前`;
-  if (hours < 24) return `${hours}小时前`;
-  if (days < 7) return `${days}天前`;
+  let result: string;
+  if (minutes < 1) result = "刚刚";
+  else if (minutes < 60) result = `${minutes}分钟前`;
+  else if (hours < 24) result = `${hours}小时前`;
+  else if (days < 7) result = `${days}天前`;
+  else result = new Date(timestamp).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
   
-  return new Date(timestamp).toLocaleDateString("zh-CN", {
-    month: "short",
-    day: "numeric",
-  });
+  timeFormatCache.set(cacheKey, result);
+  // Limit cache size
+  if (timeFormatCache.size > 100) {
+    const firstKey = timeFormatCache.keys().next().value;
+    timeFormatCache.delete(firstKey);
+  }
+  
+  return result;
 }
 
-// Helper function to count words/characters
+// Cache for word count to avoid recalculation
+const wordCountCache = new Map<string, { chars: number; words: number }>();
+
+// Helper function to count words/characters with caching
 function getWordCount(text: string): { chars: number; words: number } {
+  if (wordCountCache.has(text)) {
+    return wordCountCache.get(text)!;
+  }
+  
   const chars = text.length;
-  // Simple word count for mixed Chinese/English text
-  const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-  const englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
-  return { chars, words: chineseChars + englishWords };
+  // Optimized word count - only count if needed
+  let chineseChars = 0;
+  let englishWords = 0;
+  
+  // Only calculate detailed count for display purposes
+  if (chars < 10000) { // Skip for very long texts
+    for (let i = 0; i < chars; i++) {
+      const code = text.charCodeAt(i);
+      if (code >= 0x4e00 && code <= 0x9fa5) chineseChars++;
+    }
+    englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
+  }
+  
+  const result = { chars, words: chineseChars + englishWords };
+  
+  // Limit cache size
+  if (wordCountCache.size > 50) {
+    const firstKey = wordCountCache.keys().next().value;
+    wordCountCache.delete(firstKey);
+  }
+  
+  wordCountCache.set(text, result);
+  return result;
 }
 
 export default function Command() {
@@ -117,32 +157,32 @@ export default function Command() {
         });
       }
 
-      // Stream response with debounced updates
+      // Stream response with optimized throttling for smoother updates
       let fullResponse = "";
-      let pendingUpdate = "";
+      let lastUpdateTime = Date.now();
+      const minUpdateInterval = 100; // Update at most every 100ms for smoother experience
+      let updatePending = false;
       
       for await (const chunk of poeClientRef.current.streamChat(currentConv.messages)) {
         fullResponse += chunk;
-        pendingUpdate += chunk;
         
-        // Debounce UI updates for better performance
-        if (streamUpdateTimerRef.current) {
-          clearTimeout(streamUpdateTimerRef.current);
+        const now = Date.now();
+        
+        // Throttle updates for better performance
+        if (!updatePending && now - lastUpdateTime >= minUpdateInterval) {
+          lastUpdateTime = now;
+          updatePending = true;
+          
+          // Use setImmediate for non-blocking updates
+          setImmediate(() => {
+            setStreamingResponse(fullResponse);
+            updatePending = false;
+          });
         }
-        
-        streamUpdateTimerRef.current = setTimeout(() => {
-          setStreamingResponse(fullResponse);
-          pendingUpdate = "";
-        }, 50); // Update every 50ms max
       }
       
-      // Clear any pending timer and do final update
-      if (streamUpdateTimerRef.current) {
-        clearTimeout(streamUpdateTimerRef.current);
-      }
-      if (pendingUpdate) {
-        setStreamingResponse(fullResponse);
-      }
+      // Always do final update to ensure we show complete response
+      setStreamingResponse(fullResponse);
 
       // Add assistant message
       const assistantMessage: Message = {
@@ -171,7 +211,7 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }, [conversation, preferences, streamingResponse]);
+  }, [conversation, preferences]);
 
   const renderedMarkdown = useMemo(() => {
     const messages = conversation?.messages || [];
@@ -227,7 +267,12 @@ export default function Command() {
     }
 
     return parts.join("");
-  }, [conversation?.messages, streamingResponse, preferences.botName]);
+  }, [
+    conversation?.messages.length,
+    conversation?.messages[conversation?.messages.length - 1]?.timestamp,
+    streamingResponse,
+    preferences.botName,
+  ]);
 
   const handleNewConversation = useCallback(() => {
     setConversation(null);
@@ -239,7 +284,7 @@ export default function Command() {
 
   const lastMessageContent = useMemo(
     () => conversation?.messages[conversation.messages.length - 1]?.content || "",
-    [conversation?.messages]
+    [conversation?.messages.length]
   );
 
   const allMessagesText = useMemo(
@@ -251,7 +296,7 @@ export default function Command() {
           return `${role} ${time}\n${msg.content}`;
         })
         .join("\n\n---\n\n") || "",
-    [conversation?.messages, preferences.botName]
+    [conversation?.messages.length, preferences.botName]
   );
 
   const conversationMetadata = useMemo(
@@ -317,7 +362,13 @@ export default function Command() {
         </Detail.Metadata>
       );
     },
-    [conversation, isSaved]
+    [
+      conversation?.id,
+      conversation?.messages.length,
+      conversation?.createdAt,
+      conversation?.botName,
+      isSaved,
+    ]
   );
 
   return (
