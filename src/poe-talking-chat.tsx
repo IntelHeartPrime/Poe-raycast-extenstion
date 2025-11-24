@@ -27,6 +27,35 @@ interface Preferences {
   appTitle?: string;
 }
 
+// Helper function to format relative time
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 60) return "刚刚";
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days < 7) return `${days}天前`;
+  
+  return new Date(timestamp).toLocaleDateString("zh-CN", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+// Helper function to count words/characters
+function getWordCount(text: string): { chars: number; words: number } {
+  const chars = text.length;
+  // Simple word count for mixed Chinese/English text
+  const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const englishWords = (text.match(/[a-zA-Z]+/g) || []).length;
+  return { chars, words: chineseChars + englishWords };
+}
+
 export default function Command() {
   const preferences = getPreferenceValues<Preferences>();
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -148,31 +177,53 @@ export default function Command() {
     const messages = conversation?.messages || [];
     
     if (messages.length === 0 && !streamingResponse) {
-      return `# 💬 与 ${preferences.botName} 对话\n\n在下方输入框中输入消息，按 ⌘+Enter 发送\n\n您可以直接选中并复制任何文字内容`;
+      return `# 💬 开始与 ${preferences.botName} 对话\n\n---\n\n✨ **快速开始**\n\n• 按 ⌘+Enter 发送消息\n• 所有内容支持选中复制\n• 支持 Markdown 格式\n• 代码块自动高亮\n\n---\n\n💡 **提示**: 对话会自动保存到历史记录`;
     }
     
     const parts: string[] = [];
+    let messageIndex = 0;
     
     for (const msg of messages) {
+      messageIndex++;
       const time = new Date(msg.timestamp).toLocaleTimeString("zh-CN", {
         hour: "2-digit",
         minute: "2-digit",
       });
+      const relativeTime = formatRelativeTime(msg.timestamp);
+      const { chars, words } = getWordCount(msg.content);
       
       if (msg.role === "user") {
-        parts.push(`> 👤 **You** _${time}_\n\n${msg.content}\n\n---\n\n`);
+        parts.push(
+          `### 💭 #${messageIndex} You\n\n` +
+          `> 📅 ${time} · ${relativeTime} · ${chars}字\n\n` +
+          `${msg.content}\n\n` +
+          `---\n\n`
+        );
       } else {
-        parts.push(`> 🤖 **${preferences.botName}** _${time}_\n\n${msg.content}\n\n---\n\n`);
+        parts.push(
+          `### 🤖 #${messageIndex} ${preferences.botName}\n\n` +
+          `> 📅 ${time} · ${relativeTime} · ${chars}字\n\n` +
+          `${msg.content}\n\n` +
+          `---\n\n`
+        );
       }
     }
 
     // Show streaming response
     if (streamingResponse) {
+      messageIndex++;
       const time = new Date().toLocaleTimeString("zh-CN", {
         hour: "2-digit",
         minute: "2-digit",
       });
-      parts.push(`> 🤖 **${preferences.botName}** _${time}_\n\n${streamingResponse}█\n\n---\n\n`);
+      const { chars } = getWordCount(streamingResponse);
+      
+      parts.push(
+        `### 🤖 #${messageIndex} ${preferences.botName}\n\n` +
+        `> ⚡ 正在输入... · 已生成 ${chars}字\n\n` +
+        `${streamingResponse}█\n\n` +
+        `---\n\n`
+      );
     }
 
     return parts.join("");
@@ -204,32 +255,68 @@ export default function Command() {
   );
 
   const conversationMetadata = useMemo(
-    () =>
-      conversation ? (
+    () => {
+      if (!conversation) return undefined;
+      
+      const userMessages = conversation.messages.filter(m => m.role === "user");
+      const aiMessages = conversation.messages.filter(m => m.role === "assistant");
+      
+      const totalChars = conversation.messages.reduce((sum, msg) => {
+        return sum + msg.content.length;
+      }, 0);
+      
+      const avgChars = Math.round(totalChars / conversation.messages.length);
+      
+      const duration = Date.now() - conversation.createdAt;
+      const durationMinutes = Math.round(duration / 60000);
+      
+      return (
         <Detail.Metadata>
-          <Detail.Metadata.Label title="Bot" text={conversation.botName} />
+          <Detail.Metadata.Label title="🤖 Bot" text={conversation.botName} />
           <Detail.Metadata.Separator />
-          <Detail.Metadata.Label title="消息数" text={`${conversation.messages.length} 条`} />
+          
+          <Detail.Metadata.Label 
+            title="💬 消息数" 
+            text={`${conversation.messages.length} 条`} 
+          />
+          <Detail.Metadata.Label 
+            title="分布" 
+            text={`👤 ${userMessages.length} · 🤖 ${aiMessages.length}`} 
+          />
           <Detail.Metadata.Separator />
+          
+          <Detail.Metadata.Label 
+            title="📝 总字数" 
+            text={`${totalChars.toLocaleString()} 字`} 
+          />
+          <Detail.Metadata.Label 
+            title="平均" 
+            text={`${avgChars} 字/条`} 
+          />
+          <Detail.Metadata.Separator />
+          
           <Detail.Metadata.Label
-            title="开始时间"
+            title="⏱️ 开始时间"
             text={new Date(conversation.createdAt).toLocaleString("zh-CN", {
               year: "numeric",
               month: "2-digit",
               day: "2-digit",
               hour: "2-digit",
               minute: "2-digit",
-              second: "2-digit",
             })}
           />
+          <Detail.Metadata.Label
+            title="持续时间"
+            text={durationMinutes < 60 ? `${durationMinutes}分钟` : `${Math.round(durationMinutes/60)}小时`}
+          />
+          <Detail.Metadata.Separator />
+          
           {isSaved && (
-            <>
-              <Detail.Metadata.Separator />
-              <Detail.Metadata.Label title="状态" icon="✅" text="对话已保存" />
-            </>
+            <Detail.Metadata.Label title="💾 状态" icon="✅" text="已保存" />
           )}
         </Detail.Metadata>
-      ) : undefined,
+      );
+    },
     [conversation, isSaved]
   );
 
