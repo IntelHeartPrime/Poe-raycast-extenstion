@@ -1,15 +1,15 @@
 import {
-  Detail,
   ActionPanel,
   Action,
   getPreferenceValues,
   showToast,
   Toast,
   Icon,
+  Detail,
   Form,
   useNavigation,
 } from "@raycast/api";
-import { useState } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { PoeClient } from "./utils/poe-client";
 import {
   Conversation,
@@ -32,9 +32,12 @@ export default function Command() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState("");
+  const [isSaved, setIsSaved] = useState(false);
   const { push } = useNavigation();
+  const poeClientRef = useRef<PoeClient | null>(null);
+  const streamUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  async function handleSendMessage(message: string) {
+  const handleSendMessage = useCallback(async (message: string) => {
     if (!message.trim()) {
       showToast(Toast.Style.Failure, "请输入消息");
       return;
@@ -47,6 +50,7 @@ export default function Command() {
 
     setIsLoading(true);
     setStreamingResponse("");
+    setIsSaved(false);
 
     try {
       // Create user message
@@ -73,19 +77,41 @@ export default function Command() {
       currentConv.updatedAt = Date.now();
       setConversation({ ...currentConv });
 
-      // Initialize Poe client
-      const poeClient = new PoeClient({
-        apiKey: preferences.poeApiKey,
-        botName: preferences.botName,
-        proxyUrl: preferences.proxyUrl,
-        refererUrl: preferences.refererUrl,
-        appTitle: preferences.appTitle,
-      });
+      // Initialize or reuse Poe client
+      if (!poeClientRef.current) {
+        poeClientRef.current = new PoeClient({
+          apiKey: preferences.poeApiKey,
+          botName: preferences.botName,
+          proxyUrl: preferences.proxyUrl,
+          refererUrl: preferences.refererUrl,
+          appTitle: preferences.appTitle,
+        });
+      }
 
-      // Stream response
+      // Stream response with debounced updates
       let fullResponse = "";
-      for await (const chunk of poeClient.streamChat(currentConv.messages)) {
+      let pendingUpdate = "";
+      
+      for await (const chunk of poeClientRef.current.streamChat(currentConv.messages)) {
         fullResponse += chunk;
+        pendingUpdate += chunk;
+        
+        // Debounce UI updates for better performance
+        if (streamUpdateTimerRef.current) {
+          clearTimeout(streamUpdateTimerRef.current);
+        }
+        
+        streamUpdateTimerRef.current = setTimeout(() => {
+          setStreamingResponse(fullResponse);
+          pendingUpdate = "";
+        }, 50); // Update every 50ms max
+      }
+      
+      // Clear any pending timer and do final update
+      if (streamUpdateTimerRef.current) {
+        clearTimeout(streamUpdateTimerRef.current);
+      }
+      if (pendingUpdate) {
         setStreamingResponse(fullResponse);
       }
 
@@ -103,6 +129,7 @@ export default function Command() {
       await saveConversation(currentConv);
       setConversation({ ...currentConv });
       setStreamingResponse("");
+      setIsSaved(true);
 
       showToast(Toast.Style.Success, "对话已保存");
     } catch (error) {
@@ -115,21 +142,29 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [conversation, preferences, streamingResponse]);
 
-  function renderConversation() {
+  const renderedMarkdown = useMemo(() => {
     const messages = conversation?.messages || [];
     
-    let markdown = messages
-      .map((msg) => {
-        const role = msg.role === "user" ? "**👤 You**" : "**🤖 " + preferences.botName + "**";
-        const time = new Date(msg.timestamp).toLocaleTimeString("zh-CN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        return `${role} _${time}_\n\n${msg.content}\n\n---\n`;
-      })
-      .join("\n");
+    if (messages.length === 0 && !streamingResponse) {
+      return `# 💬 与 ${preferences.botName} 对话\n\n在下方输入框中输入消息，按 ⌘+Enter 发送\n\n您可以直接选中并复制任何文字内容`;
+    }
+    
+    const parts: string[] = [];
+    
+    for (const msg of messages) {
+      const time = new Date(msg.timestamp).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      
+      if (msg.role === "user") {
+        parts.push(`> 👤 **You** _${time}_\n\n${msg.content}\n\n---\n\n`);
+      } else {
+        parts.push(`> 🤖 **${preferences.botName}** _${time}_\n\n${msg.content}\n\n---\n\n`);
+      }
+    }
 
     // Show streaming response
     if (streamingResponse) {
@@ -137,19 +172,70 @@ export default function Command() {
         hour: "2-digit",
         minute: "2-digit",
       });
-      markdown += `\n**🤖 ${preferences.botName}** _${time}_\n\n${streamingResponse}█\n\n---\n`;
+      parts.push(`> 🤖 **${preferences.botName}** _${time}_\n\n${streamingResponse}█\n\n---\n\n`);
     }
 
-    if (!markdown) {
-      markdown = `# 💬 Chat with ${preferences.botName}\n\n按 **⌘ + Enter** 开始发送消息...`;
-    }
+    return parts.join("");
+  }, [conversation?.messages, streamingResponse, preferences.botName]);
 
-    return markdown;
-  }
+  const handleNewConversation = useCallback(() => {
+    setConversation(null);
+    setStreamingResponse("");
+    setIsSaved(false);
+    poeClientRef.current = null; // Reset client
+    showToast(Toast.Style.Success, "已开始新对话");
+  }, []);
+
+  const lastMessageContent = useMemo(
+    () => conversation?.messages[conversation.messages.length - 1]?.content || "",
+    [conversation?.messages]
+  );
+
+  const allMessagesText = useMemo(
+    () =>
+      conversation?.messages
+        .map((msg) => {
+          const role = msg.role === "user" ? "You" : preferences.botName;
+          const time = new Date(msg.timestamp).toLocaleTimeString("zh-CN");
+          return `${role} ${time}\n${msg.content}`;
+        })
+        .join("\n\n---\n\n") || "",
+    [conversation?.messages, preferences.botName]
+  );
+
+  const conversationMetadata = useMemo(
+    () =>
+      conversation ? (
+        <Detail.Metadata>
+          <Detail.Metadata.Label title="Bot" text={conversation.botName} />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label title="消息数" text={`${conversation.messages.length} 条`} />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label
+            title="开始时间"
+            text={new Date(conversation.createdAt).toLocaleString("zh-CN", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
+          />
+          {isSaved && (
+            <>
+              <Detail.Metadata.Separator />
+              <Detail.Metadata.Label title="状态" icon="✅" text="对话已保存" />
+            </>
+          )}
+        </Detail.Metadata>
+      ) : undefined,
+    [conversation, isSaved]
+  );
 
   return (
     <Detail
-      markdown={renderConversation()}
+      markdown={renderedMarkdown}
       isLoading={isLoading}
       actions={
         <ActionPanel>
@@ -165,50 +251,38 @@ export default function Command() {
             title="新对话"
             icon={Icon.Plus}
             shortcut={{ modifiers: ["cmd"], key: "n" }}
-            onAction={() => {
-              setConversation(null);
-              setStreamingResponse("");
-              showToast(Toast.Style.Success, "已开始新对话");
-            }}
+            onAction={handleNewConversation}
           />
           {conversation && conversation.messages.length > 0 && (
-            <Action.CopyToClipboard
-              title="复制最后回复"
-              icon={Icon.Clipboard}
-              shortcut={{ modifiers: ["cmd"], key: "c" }}
-              content={
-                conversation.messages[conversation.messages.length - 1]?.content || ""
-              }
-            />
+            <>
+              <Action.CopyToClipboard
+                title="复制最后回复"
+                icon={Icon.Clipboard}
+                shortcut={{ modifiers: ["cmd"], key: "c" }}
+                content={lastMessageContent}
+              />
+              <Action.CopyToClipboard
+                title="复制全部对话"
+                icon={Icon.Document}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+                content={allMessagesText}
+              />
+            </>
           )}
         </ActionPanel>
       }
-      metadata={
-        conversation && (
-          <Detail.Metadata>
-            <Detail.Metadata.Label title="Bot" text={conversation.botName} />
-            <Detail.Metadata.Label
-              title="消息数"
-              text={`${conversation.messages.length} 条`}
-            />
-            <Detail.Metadata.Separator />
-            <Detail.Metadata.Label
-              title="开始时间"
-              text={new Date(conversation.createdAt).toLocaleString("zh-CN")}
-            />
-          </Detail.Metadata>
-        )
-      }
+      metadata={conversationMetadata}
     />
   );
 }
 
 function MessageInput({ onSubmit }: { onSubmit: (message: string) => void }) {
   const { pop } = useNavigation();
+  const [message, setMessage] = useState("");
 
-  function handleSubmit(values: { message: string }) {
-    if (values.message.trim()) {
-      onSubmit(values.message);
+  function handleSubmit() {
+    if (message.trim()) {
+      onSubmit(message);
       pop();
     }
   }
@@ -217,10 +291,16 @@ function MessageInput({ onSubmit }: { onSubmit: (message: string) => void }) {
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm
+          <Action
             title="发送消息"
             icon={Icon.ArrowRight}
-            onSubmit={handleSubmit}
+            onAction={handleSubmit}
+          />
+          <Action
+            title="取消"
+            icon={Icon.XMarkCircle}
+            shortcut={{ modifiers: ["cmd"], key: "w" }}
+            onAction={pop}
           />
         </ActionPanel>
       }
@@ -228,9 +308,12 @@ function MessageInput({ onSubmit }: { onSubmit: (message: string) => void }) {
       <Form.TextArea
         id="message"
         title="消息"
-        placeholder="输入你想对 AI 说的话..."
+        placeholder="输入框，常在的输入框..."
+        value={message}
+        onChange={setMessage}
         autoFocus
       />
+      <Form.Description text="💡 提示：按 Enter 换行，按 ⌘+Enter 或点击按钮发送消息" />
     </Form>
   );
 }

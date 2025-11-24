@@ -30,7 +30,8 @@ export async function ensureHistoryDir(): Promise<void> {
 export async function saveConversation(conversation: Conversation): Promise<void> {
   await ensureHistoryDir();
   const filePath = join(HISTORY_DIR, `${conversation.id}.json`);
-  await fs.writeFile(filePath, JSON.stringify(conversation, null, 2), "utf-8");
+  // Use space=0 for smaller file size and faster writes
+  await fs.writeFile(filePath, JSON.stringify(conversation), "utf-8");
 }
 
 export async function loadConversation(id: string): Promise<Conversation | null> {
@@ -48,18 +49,19 @@ export async function listConversations(): Promise<Conversation[]> {
   await ensureHistoryDir();
   try {
     const files = await fs.readdir(HISTORY_DIR);
-    const conversations: Conversation[] = [];
+    const jsonFiles = files.filter(file => file.endsWith(".json"));
 
-    for (const file of files) {
-      if (file.endsWith(".json")) {
-        try {
-          const data = await fs.readFile(join(HISTORY_DIR, file), "utf-8");
-          conversations.push(JSON.parse(data));
-        } catch (error) {
-          console.error(`Failed to read conversation file ${file}:`, error);
-        }
-      }
-    }
+    // Parallel read for better performance
+    const results = await Promise.allSettled(
+      jsonFiles.map(async (file) => {
+        const data = await fs.readFile(join(HISTORY_DIR, file), "utf-8");
+        return JSON.parse(data) as Conversation;
+      })
+    );
+
+    const conversations = results
+      .filter((result): result is PromiseFulfilledResult<Conversation> => result.status === "fulfilled")
+      .map((result) => result.value);
 
     // Sort by updatedAt, newest first
     return conversations.sort((a, b) => b.updatedAt - a.updatedAt);

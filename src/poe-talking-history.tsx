@@ -9,14 +9,14 @@ import {
   Alert,
   Color,
 } from "@raycast/api";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { listConversations, deleteConversation, Conversation } from "./utils/history";
 
 export default function Command() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  async function loadConversations() {
+  const loadConversations = useCallback(async () => {
     setIsLoading(true);
     try {
       const convs = await listConversations();
@@ -27,13 +27,13 @@ export default function Command() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadConversations();
   }, []);
 
-  async function handleDelete(conversation: Conversation) {
+  const handleDelete = useCallback(async (conversation: Conversation) => {
     const confirmed = await confirmAlert({
       title: "删除对话",
       message: `确定要删除 "${conversation.title}" 吗？`,
@@ -53,9 +53,9 @@ export default function Command() {
         showToast(Toast.Style.Failure, "删除失败");
       }
     }
-  }
+  }, [loadConversations]);
 
-  function formatDate(timestamp: number): string {
+  const formatDate = useCallback((timestamp: number): string => {
     const date = new Date(timestamp);
     const now = new Date();
     const diffInMs = now.getTime() - date.getTime();
@@ -68,7 +68,7 @@ export default function Command() {
     } else {
       return date.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
     }
-  }
+  }, []);
 
   return (
     <List isLoading={isLoading} searchBarPlaceholder="搜索对话...">

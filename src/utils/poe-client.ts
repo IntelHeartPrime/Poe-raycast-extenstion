@@ -11,6 +11,10 @@ export interface PoeClientConfig {
   appTitle?: string;
 }
 
+// Cache proxy agent to avoid recreating
+let cachedAgent: HttpsProxyAgent<string> | undefined;
+let cachedProxyUrl: string | undefined;
+
 function getProxyAgent(configProxyUrl?: string) {
   // 优先使用配置中的代理
   const proxyUrl = 
@@ -23,11 +27,15 @@ function getProxyAgent(configProxyUrl?: string) {
     process.env.all_proxy;
 
   if (proxyUrl) {
-    console.log(`🔗 Using proxy: ${proxyUrl}`);
-    return new HttpsProxyAgent(proxyUrl);
+    // Reuse cached agent if proxy URL hasn't changed
+    if (cachedProxyUrl === proxyUrl && cachedAgent) {
+      return cachedAgent;
+    }
+    cachedProxyUrl = proxyUrl;
+    cachedAgent = new HttpsProxyAgent(proxyUrl);
+    return cachedAgent;
   }
 
-  console.log(`⚠️  No proxy configured - this may cause timeout if you need VPN/proxy`);
   return undefined;
 }
 
@@ -78,11 +86,6 @@ export class PoeClient {
     }));
 
     try {
-      console.log("📤 发送流式请求:");
-      console.log("  Bot:", this.botName);
-      console.log("  Messages:", formattedMessages.length);
-      console.log("  Base URL:", "https://api.poe.com/v1");
-      
       const stream = await this.client.chat.completions.create({
         model: this.botName,
         messages: formattedMessages,
@@ -118,11 +121,6 @@ export class PoeClient {
     }));
 
     try {
-      console.log("📤 发送请求:");
-      console.log("  Bot:", this.botName);
-      console.log("  Messages:", formattedMessages.length);
-      console.log("  Base URL:", "https://api.poe.com/v1");
-      
       const completion = await this.client.chat.completions.create({
         model: this.botName,
         messages: formattedMessages,
@@ -130,12 +128,7 @@ export class PoeClient {
 
       return completion.choices[0]?.message?.content || "";
     } catch (error: unknown) {
-      console.error("❌ 请求失败:", error);
       const err = error as { code?: string; message?: string; status?: number; cause?: unknown };
-      
-      if (err.cause) {
-        console.error("❌ 错误原因:", err.cause);
-      }
       
       if (err.code === 'ETIMEDOUT' || err.message?.includes('timeout')) {
         throw new Error(`请求超时 (${err.code || 'timeout'})，请检查：1) 代理是否运行 2) 网络连接`);
