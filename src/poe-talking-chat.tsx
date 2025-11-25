@@ -445,6 +445,12 @@ function ChatView({
             }}
           />
           <Action
+            title="关闭"
+            icon={Icon.XMarkCircle}
+            shortcut={{ modifiers: [], key: "escape" }}
+            onAction={pop}
+          />
+          <Action
             title="新对话"
             icon={Icon.Plus}
             shortcut={{ modifiers: ["cmd"], key: "n" }}
