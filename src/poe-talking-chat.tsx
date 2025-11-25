@@ -102,9 +102,48 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingResponse, setStreamingResponse] = useState("");
   const [isSaved, setIsSaved] = useState(false);
-  const { push } = useNavigation();
   const poeClientRef = useRef<PoeClient | null>(null);
   const streamUpdateTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  return <ChatView
+    conversation={conversation}
+    setConversation={setConversation}
+    isLoading={isLoading}
+    setIsLoading={setIsLoading}
+    streamingResponse={streamingResponse}
+    setStreamingResponse={setStreamingResponse}
+    isSaved={isSaved}
+    setIsSaved={setIsSaved}
+    poeClientRef={poeClientRef}
+    preferences={preferences}
+  />;
+}
+
+function ChatView({
+  conversation,
+  setConversation,
+  isLoading,
+  setIsLoading,
+  streamingResponse,
+  setStreamingResponse,
+  isSaved,
+  setIsSaved,
+  poeClientRef,
+  preferences,
+}: {
+  conversation: Conversation | null;
+  setConversation: (conv: Conversation | null) => void;
+  isLoading: boolean;
+  setIsLoading: (loading: boolean) => void;
+  streamingResponse: string;
+  setStreamingResponse: (response: string) => void;
+  isSaved: boolean;
+  setIsSaved: (saved: boolean) => void;
+  poeClientRef: React.MutableRefObject<PoeClient | null>;
+  preferences: Preferences;
+}) {
+  const { push, pop } = useNavigation();
+  const [showInput, setShowInput] = useState(conversation === null || conversation.messages.length === 0);
 
   const handleSendMessage = useCallback(async (message: string) => {
     if (!message.trim()) {
@@ -278,6 +317,7 @@ export default function Command() {
     setConversation(null);
     setStreamingResponse("");
     setIsSaved(false);
+    setShowInput(true);
     poeClientRef.current = null; // Reset client
     showToast(Toast.Style.Success, "已开始新对话");
   }, []);
@@ -371,6 +411,25 @@ export default function Command() {
     ]
   );
 
+  // 如果是新对话或没有消息，直接显示输入框
+  if (showInput) {
+    return (
+      <MessageInput 
+        onSubmit={(message) => {
+          handleSendMessage(message);
+          setShowInput(false);
+        }}
+        onCancel={() => {
+          if (conversation && conversation.messages.length > 0) {
+            setShowInput(false);
+          } else {
+            pop();
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <Detail
       markdown={renderedMarkdown}
@@ -382,7 +441,7 @@ export default function Command() {
             icon={Icon.Message}
             shortcut={{ modifiers: ["cmd"], key: "return" }}
             onAction={() => {
-              push(<MessageInput onSubmit={handleSendMessage} />);
+              setShowInput(true);
             }}
           />
           <Action
@@ -414,13 +473,26 @@ export default function Command() {
   );
 }
 
-function MessageInput({ onSubmit }: { onSubmit: (message: string) => void }) {
+function MessageInput({ 
+  onSubmit,
+  onCancel 
+}: { 
+  onSubmit: (message: string) => void;
+  onCancel?: () => void;
+}) {
   const { pop } = useNavigation();
   const [message, setMessage] = useState("");
 
   function handleSubmit() {
     if (message.trim()) {
       onSubmit(message);
+    }
+  }
+
+  function handleCancel() {
+    if (onCancel) {
+      onCancel();
+    } else {
       pop();
     }
   }
@@ -437,8 +509,8 @@ function MessageInput({ onSubmit }: { onSubmit: (message: string) => void }) {
           <Action
             title="取消"
             icon={Icon.XMarkCircle}
-            shortcut={{ modifiers: ["cmd"], key: "w" }}
-            onAction={pop}
+            shortcut={{ modifiers: [], key: "escape" }}
+            onAction={handleCancel}
           />
         </ActionPanel>
       }
