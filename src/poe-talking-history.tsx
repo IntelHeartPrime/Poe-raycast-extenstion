@@ -8,6 +8,7 @@ import {
   confirmAlert,
   Alert,
   Color,
+  Detail,
 } from "@raycast/api";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { listConversations, deleteConversation, Conversation } from "./utils/history";
@@ -127,29 +128,158 @@ export default function Command() {
 }
 
 function ConversationDetail({ conversation }: { conversation: Conversation }) {
-  const markdown = conversation.messages
-    .map((msg) => {
-      const role = msg.role === "user" ? "👤 You" : "🤖 AI";
-      const time = new Date(msg.timestamp).toLocaleString("zh-CN");
-      return `### ${role} _${time}_\n\n${msg.content}\n\n---\n`;
-    })
-    .join("\n");
+  const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  
+  // 生成完整的对话内容 markdown
+  const fullMarkdown = useMemo(() => {
+    const header = `# ${conversation.title}\n\n`;
+    const metadata = `**机器人:** ${conversation.botName} | **消息数:** ${conversation.messages.length} | **创建时间:** ${new Date(conversation.createdAt).toLocaleString("zh-CN")}\n\n---\n\n`;
+    
+    const messages = conversation.messages
+      .map((msg, index) => {
+        const role = msg.role === "user" ? "👤 **You**" : "🤖 **AI**";
+        const time = new Date(msg.timestamp).toLocaleString("zh-CN");
+        const messageNumber = `\`#${index + 1}\``;
+        return `${messageNumber} ${role} · _${time}_\n\n${msg.content}\n\n---\n`;
+      })
+      .join("\n");
+    
+    return header + metadata + messages;
+  }, [conversation]);
+
+  // 生成纯文本版本（用于复制）
+  const plainTextContent = useMemo(() => {
+    return conversation.messages
+      .map((msg, index) => {
+        const role = msg.role === "user" ? "You" : "AI";
+        const time = new Date(msg.timestamp).toLocaleString("zh-CN");
+        return `[${index + 1}] ${role} (${time}):\n${msg.content}\n`;
+      })
+      .join("\n---\n\n");
+  }, [conversation]);
+
+  // 生成单条消息的 markdown（用于快速导航）
+  const getSingleMessageMarkdown = (index: number) => {
+    if (index < 0 || index >= conversation.messages.length) {
+      return fullMarkdown;
+    }
+    
+    const msg = conversation.messages[index];
+    const role = msg.role === "user" ? "👤 **You**" : "🤖 **AI**";
+    const time = new Date(msg.timestamp).toLocaleString("zh-CN");
+    
+    const prevIndicator = index > 0 ? `⬆️ [上一条消息 #${index}]` : "";
+    const nextIndicator = index < conversation.messages.length - 1 ? `⬇️ [下一条消息 #${index + 2}]` : "";
+    const navigation = [prevIndicator, nextIndicator].filter(Boolean).join(" | ");
+    
+    return `# ${conversation.title}\n\n**消息 ${index + 1} / ${conversation.messages.length}**\n\n${navigation}\n\n---\n\n${role} · _${time}_\n\n${msg.content}\n\n---\n\n${navigation}`;
+  };
+
+  const [viewMode, setViewMode] = useState<"full" | "single">("full");
+  const displayMarkdown = viewMode === "full" ? fullMarkdown : getSingleMessageMarkdown(currentMessageIndex);
 
   return (
-    <List>
-      <List.Item
-        title={conversation.title}
-        detail={<List.Item.Detail markdown={markdown} />}
-        actions={
-          <ActionPanel>
+    <Detail
+      markdown={displayMarkdown}
+      navigationTitle={conversation.title}
+      metadata={
+        <Detail.Metadata>
+          <Detail.Metadata.Label title="机器人" text={conversation.botName} />
+          <Detail.Metadata.Label 
+            title="消息数" 
+            text={`${conversation.messages.length} 条`} 
+          />
+          <Detail.Metadata.Label 
+            title="创建时间" 
+            text={new Date(conversation.createdAt).toLocaleString("zh-CN")} 
+          />
+          <Detail.Metadata.Label 
+            title="更新时间" 
+            text={new Date(conversation.updatedAt).toLocaleString("zh-CN")} 
+          />
+          <Detail.Metadata.Separator />
+          <Detail.Metadata.Label 
+            title="查看模式" 
+            text={viewMode === "full" ? "完整对话" : `单条消息 (${currentMessageIndex + 1}/${conversation.messages.length})`} 
+          />
+        </Detail.Metadata>
+      }
+      actions={
+        <ActionPanel>
+          <ActionPanel.Section title="查看">
+            {viewMode === "single" && (
+              <>
+                {currentMessageIndex > 0 && (
+                  <Action
+                    title="上一条消息"
+                    icon={Icon.ArrowUp}
+                    shortcut={{ modifiers: ["cmd"], key: "arrowUp" }}
+                    onAction={() => setCurrentMessageIndex((prev) => Math.max(0, prev - 1))}
+                  />
+                )}
+                {currentMessageIndex < conversation.messages.length - 1 && (
+                  <Action
+                    title="下一条消息"
+                    icon={Icon.ArrowDown}
+                    shortcut={{ modifiers: ["cmd"], key: "arrowDown" }}
+                    onAction={() => setCurrentMessageIndex((prev) => Math.min(conversation.messages.length - 1, prev + 1))}
+                  />
+                )}
+              </>
+            )}
+            <Action
+              title={viewMode === "full" ? "切换到单条模式" : "切换到完整模式"}
+              icon={viewMode === "full" ? Icon.List : Icon.Text}
+              shortcut={{ modifiers: ["cmd"], key: "t" }}
+              onAction={() => {
+                setViewMode((prev) => prev === "full" ? "single" : "full");
+                if (viewMode === "full") {
+                  setCurrentMessageIndex(0);
+                }
+              }}
+            />
+          </ActionPanel.Section>
+          
+          <ActionPanel.Section title="操作">
             <Action.CopyToClipboard
-              title="复制全部内容"
-              content={markdown}
+              title="复制全部对话（纯文本）"
+              content={plainTextContent}
               shortcut={{ modifiers: ["cmd"], key: "c" }}
             />
-          </ActionPanel>
-        }
-      />
-    </List>
+            <Action.CopyToClipboard
+              title="复制 Markdown 格式"
+              content={fullMarkdown}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+            />
+            {viewMode === "single" && (
+              <Action.CopyToClipboard
+                title="复制当前消息"
+                content={conversation.messages[currentMessageIndex].content}
+                shortcut={{ modifiers: ["cmd", "opt"], key: "c" }}
+              />
+            )}
+          </ActionPanel.Section>
+          
+          <ActionPanel.Section title="导航">
+            {viewMode === "single" && conversation.messages.length > 2 && (
+              <>
+                <Action
+                  title="跳到第一条"
+                  icon={Icon.ArrowUpCircle}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "arrowUp" }}
+                  onAction={() => setCurrentMessageIndex(0)}
+                />
+                <Action
+                  title="跳到最后一条"
+                  icon={Icon.ArrowDownCircle}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "arrowDown" }}
+                  onAction={() => setCurrentMessageIndex(conversation.messages.length - 1)}
+                />
+              </>
+            )}
+          </ActionPanel.Section>
+        </ActionPanel>
+      }
+    />
   );
 }

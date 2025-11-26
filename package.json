@@ -19,28 +19,32 @@
       "title": "Chat with Poe AI",
       "subtitle": "Poe",
       "description": "Interactive chat interface with Poe AI",
-      "mode": "view"
+      "mode": "view",
+      "icon": "poe_icon.png"
     },
     {
       "name": "poe-talking-history",
       "title": "Browse Poe Conversations",
       "subtitle": "Poe",
       "description": "Browse and manage your Poe conversation history",
-      "mode": "view"
+      "mode": "view",
+      "icon": "💬"
     },
     {
       "name": "poe-test-connection",
       "title": "Test Poe Connection",
       "subtitle": "Poe",
       "description": "Test your Poe API connection and settings",
-      "mode": "no-view"
+      "mode": "no-view",
+      "icon": "🔌"
     },
     {
       "name": "poe-clear-history",
       "title": "Clear All Conversations",
       "subtitle": "Poe",
       "description": "Delete all conversation history",
-      "mode": "no-view"
+      "mode": "no-view",
+      "icon": "🗑️"
     }
   ],
   "preferences": [
