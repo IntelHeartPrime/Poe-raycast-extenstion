@@ -8,8 +8,10 @@ import {
   Detail,
   Form,
   useNavigation,
+  LaunchProps,
+  popToRoot,
 } from "@raycast/api";
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { PoeClient } from "./utils/poe-client";
 import {
   Conversation,
@@ -510,12 +512,12 @@ function MessageInput({
           <Action
             title="发送消息"
             icon={Icon.ArrowRight}
+            shortcut={{ modifiers: ["cmd"], key: "return" }}
             onAction={handleSubmit}
           />
           <Action
             title="取消"
             icon={Icon.XMarkCircle}
-            shortcut={{ modifiers: [], key: "escape" }}
             onAction={handleCancel}
           />
         </ActionPanel>
@@ -528,8 +530,16 @@ function MessageInput({
         value={message}
         onChange={setMessage}
         autoFocus
+        onKeyDown={(e) => {
+          // Only handle pure ESC key (no modifiers)
+          if (e.nativeEvent.key === "Escape" && !e.nativeEvent.shiftKey && !e.nativeEvent.ctrlKey && !e.nativeEvent.metaKey && !e.nativeEvent.altKey) {
+            e.nativeEvent.preventDefault();
+            e.nativeEvent.stopPropagation();
+            handleCancel();
+          }
+        }}
       />
-      <Form.Description text="💡 提示：按 Enter 换行，按 ⌘+Enter 或点击按钮发送消息" />
+      <Form.Description text="💡 提示：按 Enter 换行，按 ⌘+Enter 发送消息，按 Esc 取消" />
     </Form>
   );
 }
